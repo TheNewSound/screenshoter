@@ -173,6 +173,15 @@ docker run -d --restart always -p 8080:8080 --name screenshoter -e "SCREENSHOTER
 
 NOTE the example uses both env var and arg for setting a secret, any one is enough.
 
+### Planned shutdown
+
+Despite extensive efforts to prevent memory leaks, I have been unable to achieve stable memory consumption during prolonged execution in a containerized environment.
+The only viable solution is a scheduled container restart with `max-lifetime` arg or `SCREENSHOTER_MAX_LIFETIME`-env-var.
+
+| CLI arg        | EnvVar                    | Default | Comment                                |
+|----------------|---------------------------|---------|----------------------------------------|
+| --max-lifetime | SCREENSHOTER_MAX_LIFETIME |         | Timeout in seconds to shutdown the app |
+
 # API Reference
 
 ```

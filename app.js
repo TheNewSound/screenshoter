@@ -24,6 +24,9 @@ const host = argv.host || process.env.SCREENSHOTER_HOST || '0.0.0.0';
 /** @type {number} */
 const port = parseInt(argv.port || process.env.SCREENSHOTER_PORT || 8080);
 
+/** @type {number} seconds */
+const maxLifetime = parseInt(argv['max-lifetime'] || process.env.SCREENSHOTER_MAX_LIFETIME);
+
 /** @type {boolean} */
 const metrics = (() => {
     if (argv.metrics !== undefined) {
@@ -79,7 +82,7 @@ const protocolTimeoutMs = ((argv) => {
     return 60_000;
 })(argv);
 
-const exitTimeoutMs = 10_000;
+const exitTimeoutMs = parseInt(argv['force-exit-timeout-ms'] || process.env.SCREENSHOTER_FORCE_EXIT_TIMEOUT_MS || 10_000);
 
 /** @type {string[]} */
 const browserLaunchArgs = [
@@ -239,22 +242,30 @@ if (cache) {
         logger.info("\nBye!");
     });
 
-    process.on('SIGINT', async () => {
-        logger.error("SIGINT has been received");
+    const shutdownOnSignal = async (signal) => {
+        logger.error(`${signal} has been received`);
+        setTimeout(() => {
+            logger.error(`Force exiting after ${exitTimeoutMs}ms (initiator: ${signal})`);
+            process.exit(0);
+        }, exitTimeoutMs);
         if (!browser.closed) {
-            logger.info("Closing browser on SIGINT");
+            logger.info(`Closing browser on ${signal}`);
             try {
                 await browser.close();
             } catch (err) {
-                logger.error(`Error while closing browser while handling SIGINT: ${err.message}`, err);
+                logger.error(`Error while closing browser while handling ${signal}: ${err.message}`, err);
             }
         }
-        setTimeout(() => {
-            logger.error(`Force exiting after ${exitTimeoutMs} ms`);
-            process.exit(0);
-        }, exitTimeoutMs);
-        logger.info("Closing server on SIGINT");
+        logger.info(`Closing server on ${signal}`);
         await server.close();
+    };
+
+    process.on('SIGTERM', async () => {
+        await shutdownOnSignal('SIGTERM')
+    });
+
+    process.on('SIGINT', async () => {
+        await shutdownOnSignal('SIGINT')
     });
 
     process.on("unhandledRejection", async (reason, p) => {
@@ -262,6 +273,10 @@ if (cache) {
             reason: reason,
             promise: p,
         });
+        setTimeout(() => {
+            logger.error(`Force exiting after ${exitTimeoutMs} ms`);
+            process.exit(0);
+        }, exitTimeoutMs);
         if (!browser.closed) {
             logger.info("Closing browser on unhandled rejection");
             try {
@@ -270,16 +285,16 @@ if (cache) {
                 logger.error(`Error while closing browser while handling unhandled rejection: ${err.message}`, err);
             }
         }
-        setTimeout(() => {
-            logger.error(`Force exiting after ${exitTimeoutMs} ms`);
-            process.exit(0);
-        }, exitTimeoutMs);
         logger.info("Closing server on unhandled rejection");
         await server.close();
     });
 
     process.on("uncaughtException", async err => {
         logger.error(`Uncaught exception has been received: ${err.message}`, err);
+        setTimeout(() => {
+            logger.error(`Force exiting after ${exitTimeoutMs} ms`);
+            process.exit(0);
+        }, exitTimeoutMs);
         if (!browser.closed) {
             logger.info("Closing browser on uncaught exception");
             try {
@@ -288,16 +303,16 @@ if (cache) {
                 logger.error(`Error while closing browser while handling uncaught exception: ${err.message}`, err);
             }
         }
-        setTimeout(() => {
-            logger.error(`Force exiting after ${exitTimeoutMs} ms`);
-            process.exit(0);
-        }, exitTimeoutMs);
         logger.info("Closing server on uncaught exception");
         await server.close();
     });
 
     browser.on('disconnected', async () => {
         logger.error("Browser has been disconnected");
+        setTimeout(() => {
+            logger.error(`Force exiting after ${exitTimeoutMs} ms`);
+            process.exit(0);
+        }, exitTimeoutMs);
         if (!browser.closed) {
             logger.info("Closing browser on browser disconnected");
             try {
@@ -306,11 +321,15 @@ if (cache) {
                 logger.error(`Error closing browser while gracefully handling browser disconnecting: ${err.message}`, err);
             }
         }
-        setTimeout(() => {
-            logger.error(`Force exiting after ${exitTimeoutMs} ms`);
-            process.exit(0);
-        }, exitTimeoutMs);
         logger.info("Closing server on browser disconnected");
         await server.close();
     });
+
+    if (maxLifetime > 0) {
+        setTimeout(() => {
+            logger.info(`Planned shutdown is initiated ${maxLifetime}ms/SIGTERM`);
+            process.kill(process.pid, 'SIGTERM');
+        }, maxLifetime * 1_000);
+        logger.info(`The system is configured for a planned shutdown (${maxLifetime}s).`);
+    }
 })();
